@@ -1,6 +1,9 @@
 # 小尘（TenBot）
 
-TenBot 是 SanWang 内部使用的 QQ Bot，使用 TypeScript、Node.js 和 QQ 官方 Bot API。它提供本地 QQ 命令、群聊互动、Minecraft 状态查询和 AI 回复；AI 是 Bot 的一项能力，不是整个运行时。
+TenBot 是 SanWang 使用的 QQ Bot，使用 TypeScript、Node.js 和 QQ 官方 Bot API。它提供本地 QQ 命令、群聊互动、Minecraft 状态查询和 AI 回复；AI 是 Bot 的一项能力，不是整个运行时。
+
+小尘 现已废弃，不再更新，不过，这并不意味着小尘就此不再出现。
+它将带着更现代的行为，管理方式与巨大的野心，在新的仓库https://github.com/SanwangNet/Stardust中重新再见。
 
 ## 功能
 

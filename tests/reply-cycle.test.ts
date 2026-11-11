@@ -12,7 +12,9 @@ import { ModelProviderError } from "../src/ai/model-plugin.js";
 import type { AttemptRuntimeSnapshot } from "../src/ai/attempt-snapshot.js";
 import { ToolProtocolLeakError } from "../src/ai/tool-protocol.js";
 import { MemeLibraryService } from "../src/skills/meme/library-service.js";
-import { buildAutoMemeContext } from "../src/skills/meme/skill.js";
+import { buildAutoMemeContext, searchAutoMemeCandidates } from "../src/skills/meme/skill.js";
+import { createMemeSearchIndex } from "../src/skills/meme/search.js";
+import type { MemeEntry } from "../src/skills/meme/types.js";
 import { buildReplyCycleContext, recordIncomingMessageRevision, rememberIncomingMessage } from "../src/qq/conversation/recent-context.js";
 import { getConversationGeneration, isConversationActive, markConversationActive } from "../src/qq/conversation/engagement.js";
 import type { NormalizedQqMessage } from "../src/qq/message/normalize-message.js";
@@ -523,10 +525,16 @@ test("same-level hard mention replaces the effective anchor without changing the
 });
 
 test("Meme retrieval on restart considers the anchor and only newer valid messages", async () => {
+    const entries: MemeEntry[] = ["anchorword", "newword", "oldword", "fourthword"].map((name) => ({
+        id: name, name, aliases: [], summary: name, origin: name, meaning: name, usage: name, examples: [name],
+    }));
+    const snapshot = { entries, index: createMemeSearchIndex(entries), revision: 1, loadedAt: "fixture" };
     const group = randomUUID();
-    const anchor = message(group, "kskbl？");
-    const unrelated = message(group, "雪山救狐狸");
+    const old = message(group, "oldword");
+    const anchor = message(group, "anchorword");
+    const unrelated = message(group, "newword");
     markConversationActive(anchor);
+    commit(old);
     commit(anchor);
     const { bot } = fakeBot();
     const attempts: RecordedAttempt[] = [];
@@ -541,7 +549,7 @@ test("Meme retrieval on restart considers the anchor and only newer valid messag
                 .filter((item) => item.revision !== context.effectiveAnchor.revision)
                 .map((item) => ({ text: item.message.displayContent, source: "new-message" as const })),
         ];
-        memeContexts.push(buildAutoMemeContext(memeQueries));
+        memeContexts.push(buildAutoMemeContext(memeQueries, snapshot));
         return { aiInput: buildReplyCycleContext(current), imageUrls: [] };
     };
     const first = coordinateAiReply({ ...requestFor(bot, anchor, 1), buildAttempt },
@@ -550,10 +558,13 @@ test("Meme retrieval on restart considers the anchor and only newer valid messag
     commit(unrelated);
     coordinateAiReply({ ...requestFor(bot, unrelated, 1), buildAttempt });
     await waitFor(() => attempts.length === 2);
-    assert.equal(queries[0], "kskbl？");
-    assert.equal(queries[1], "kskbl？\n雪山救狐狸");
-    assert.match(memeContexts[1], /候选 1: kskbl\n匹配强度: strong/);
-    assert.match(memeContexts[1], /雪山救狐狸/);
+    assert.equal(queries[0], "anchorword");
+    assert.equal(queries[1], "anchorword\nnewword");
+    assert.match(memeContexts[1], /候选 1: anchorword\n匹配强度: strong/);
+    assert.match(memeContexts[1], /newword/);
+    assert.doesNotMatch(memeContexts[1], /oldword/);
+    const all = searchAutoMemeCandidates([{ text: "anchorword newword oldword fourthword", source: "anchor" }], 10, snapshot);
+    assert.equal(all.length, 3);
     attempts[1].resolve({ kind: "no_reply" });
     await first;
 });

@@ -58,7 +58,7 @@ const status: RuntimeStatus = {
 
 const config: PublicConfig = {
     aiProvider: "gpt",
-    image: { enabled: false, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
+    image: { enabled: false, dailyLimit: 7, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
     memeSendMaxEdge: 160,
     replyJudge: { model: "judge", timeoutMs: 5000, fallbackToMainOnInvalidOutput: true, turnWaitMs: 20_000 },
     gpt: { model: "gpt-test", reasoningEffort: "high", verbosity: "high", configured: true },
@@ -104,6 +104,20 @@ test("auth gate renders the GitHub login screen when unauthenticated and the exi
     const dashboard = renderToStaticMarkup(createElement(AuthGateView, { state: authenticated }, createElement("main", null, "Existing Dashboard")));
     assert.match(dashboard, /Existing Dashboard/);
     assert.doesNotMatch(dashboard, /使用 GitHub 登录/);
+});
+
+test("auth gate renders setup and configured password login without enabling unconfigured OAuth", () => {
+    const setup = renderToStaticMarkup(createElement(AuthGateView, { state: { kind: "setup" } }));
+    assert.match(setup, /一次性认领凭据/);
+    assert.match(setup, /管理员密码/);
+    assert.match(setup, /确认密码/);
+    assert.doesNotMatch(setup, /使用 GitHub 登录/);
+    const password = renderToStaticMarkup(createElement(AuthGateView, { state: { kind: "unauthenticated", passwordEnabled: true, githubEnabled: false } }));
+    assert.match(password, /使用密码登录/);
+    assert.doesNotMatch(password, /一次性认领凭据|使用 GitHub 登录/);
+    const both = renderToStaticMarkup(createElement(AuthGateView, { state: { kind: "unauthenticated", passwordEnabled: true, githubEnabled: true } }));
+    assert.match(both, /使用密码登录/);
+    assert.match(both, /使用 GitHub 登录/);
 });
 
 test("API 401 notifies auth gate and logout calls the server before returning to the login view", async () => {
@@ -293,7 +307,7 @@ test("AI image settings edit independently and save all parameters as one valida
 
     assert.deepEqual(settingsPatches(form), [{
         field: "image",
-        value: { enabled: true, provider: "gpt", model: "gpt-image-2", quality: "high", size: "1536x1024", outputFormat: "webp" },
+        value: { enabled: true, dailyLimit: 7, provider: "gpt", model: "gpt-image-2", quality: "high", size: "1536x1024", outputFormat: "webp" },
     }]);
     assert.equal(form.values["gpt.model"], config.gpt.model, "image model edits never change the GPT conversation model");
 
@@ -317,7 +331,7 @@ test("AI image settings edit independently and save all parameters as one valida
 test("settings center exposes four secondary pages with responsive desktop and mobile navigation", () => {
     assert.deepEqual(SETTINGS_PAGES.map((page) => page.id), ["model", "judge", "runtime", "image"]);
     const markup = renderToStaticMarkup(createElement(SettingsNavigation, {
-        section: "judge", dirtySections: new Set(["image"]), onChange() {},
+        section: "judge", dirtySections: new Set<"image">(["image"]), onChange() {},
     }));
     assert.match(markup, /aria-label="设置分类"/);
     assert.equal((markup.match(/class="settings-nav-item/g) ?? []).length, 4);
@@ -383,7 +397,7 @@ test("settings page patches exclude drafts from other pages and saved fields lea
     assert.deepEqual(settingsPatches(form, "runtime"), [{ field: "botLoopGuard.maxCycles", value: 8 }]);
     assert.deepEqual(settingsPatches(form, "image"), [{
         field: "image",
-        value: { enabled: false, provider: "gpt", model: "image-draft", quality: "low", size: "1024x1024", outputFormat: "png" },
+        value: { enabled: false, dailyLimit: 7, provider: "gpt", model: "image-draft", quality: "low", size: "1024x1024", outputFormat: "png" },
     }]);
 
     const savedJudgeConfig: PublicConfig = { ...config, replyJudge: { ...config.replyJudge, model: "judge-draft" } };

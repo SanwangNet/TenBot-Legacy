@@ -1,7 +1,7 @@
 import type { ReasoningEffort, ModelVerbosity } from "../ai/model-plugin.js";
 import type { PromptProvider } from "../ai/prompt-store.js";
 
-export type QqConnectionState = "connecting" | "connected" | "disconnected" | "error";
+export type QqConnectionState = "unconfigured" | "connecting" | "connected" | "disconnected" | "error";
 
 export interface RuntimeStatus {
     qq: QqConnectionState;

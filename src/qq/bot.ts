@@ -10,7 +10,7 @@ import type { GroupReplyControl } from "../runtime/group-reply-control.js";
 import type { BotDetector } from "../members/bot-detector.js";
 import type { ImageGenerationService } from "../ai/image-generation-service.js";
 
-export type QqConnectionState = "connecting" | "connected" | "disconnected" | "error";
+export type QqConnectionState = "unconfigured" | "connecting" | "connected" | "disconnected" | "error";
 const messageHandlerCleanup = new WeakMap<QQBot, () => void>();
 
 export function shutdownQqMessageHandler(bot: QQBot): void {

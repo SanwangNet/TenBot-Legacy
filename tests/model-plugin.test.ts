@@ -9,13 +9,17 @@ import { createDeepSeekPlugin } from "../src/ai/plugins/deepseek/index.js";
 import { createGptPlugin } from "../src/ai/plugins/gpt/index.js";
 import { listGptModelCatalog } from "../src/ai/plugins/gpt/model-catalog.js";
 import { classifyGptModel, filterGptModelsForPurpose } from "../src/ai/model-classification.js";
-import { getPromptStore } from "../src/ai/prompt-store.js";
+import { PromptStore } from "../src/ai/prompt-store.js";
 import { isToolProtocolLeak } from "../src/ai/tool-protocol.js";
 import { parseQqReplyArguments } from "../src/skills/qq-reply/skill.js";
 import { setConsoleLogOutputEnabled, subscribeLogs } from "../src/shared/logger.js";
 
-const GPT_SYSTEM_PROMPT = readFileSync(new URL("../src/ai/plugins/gpt/prompt.md", import.meta.url), "utf8");
-const DEEPSEEK_SYSTEM_PROMPT = readFileSync(new URL("../src/ai/plugins/deepseek/prompt.md", import.meta.url), "utf8");
+const promptPaths = {
+    main: new URL("./fixtures/prompts/shared.md", import.meta.url),
+    gpt: new URL("./fixtures/prompts/gpt.md", import.meta.url),
+    deepseek: new URL("./fixtures/prompts/deepseek.md", import.meta.url),
+};
+const fixtureStore = () => new PromptStore(promptPaths);
 
 type ResponseEvent = Record<string, any>;
 function complete(output: unknown[]): ResponseEvent {
@@ -38,7 +42,7 @@ function runModelPlugin(
     plugin: ReturnType<typeof createGptPlugin> | ReturnType<typeof createDeepSeekPlugin>,
     input: string,
     generateOptions: ChatOptions,
-    promptSnapshot = getPromptStore().getForModel(plugin.id),
+    promptSnapshot = fixtureStore().getForModel(plugin.id),
 ) {
     assert.ok(promptSnapshot, `missing Prompt snapshot for ${plugin.id}`);
     return runModelPluginWithSnapshot(plugin, input, generateOptions, promptSnapshot);
@@ -278,36 +282,36 @@ test("Responses batches stream diagnostics and retains final text and complete m
     }
 });
 
-test("GPT and DeepSeek use isolated provider prompts and keep the same persona", async () => {
-    assert.notEqual(GPT_SYSTEM_PROMPT, DEEPSEEK_SYSTEM_PROMPT);
-    assert.doesNotMatch(GPT_SYSTEM_PROMPT, /GPT-6 Sol/);
-    assert.doesNotMatch(DEEPSEEK_SYSTEM_PROMPT, /GPT-6 Sol/);
-    assert.match(DEEPSEEK_SYSTEM_PROMPT, /没有 web_search 工具/);
-    assert.doesNotMatch(DEEPSEEK_SYSTEM_PROMPT, /才使用 web_search/);
-    assert.match(GPT_SYSTEM_PROMPT, /可信的自身安全风险/);
-    assert.match(DEEPSEEK_SYSTEM_PROMPT, /可信的自身安全风险/);
-    assert.match(GPT_SYSTEM_PROMPT, /你叫“小尘”/);
-    assert.match(DEEPSEEK_SYSTEM_PROMPT, /你叫“小尘”/);
-    await withResponses([sse([messageText("收到")]), sse([messageText("收到")])], async (bodies) => {
-        await createGptPlugin({ apiKey: "offline", baseURL: "https://example.invalid" })
-            .generate(pluginRequest("offline", GPT_SYSTEM_PROMPT), options());
-        await createDeepSeekPlugin({ apiKey: "offline" })
-            .generate(pluginRequest("offline", DEEPSEEK_SYSTEM_PROMPT), options());
-        assert.equal(bodies[0].instructions, GPT_SYSTEM_PROMPT);
-        assert.equal(bodies[1].instructions, DEEPSEEK_SYSTEM_PROMPT);
-    });
+test("PromptStore combines shared persona with isolated provider fixtures", async () => {
+    const store = fixtureStore();
+    const gpt = store.get("gpt");
+    const deepseek = store.get("deepseek");
+    assert.equal(gpt.content, "Shared persona fixture\n\nGPT only fixture");
+    assert.equal(deepseek.content, "Shared persona fixture\n\nDeepSeek only fixture");
+    assert.doesNotMatch(gpt.content, /DeepSeek only/);
+    assert.doesNotMatch(deepseek.content, /GPT only/);
+    assert.equal(gpt.revision, 1);
+    assert.equal(deepseek.revision, 1);
+    const reloaded = await store.reload("gpt");
+    assert.equal(reloaded.revision, 2);
+    assert.equal(gpt.revision, 1);
+    assert.equal(store.get("deepseek"), deepseek);
 });
 
 test("Runtime ModelRequest captures the selected PromptStore snapshot", async () => {
+    const store = fixtureStore();
     const gpt = createGptPlugin({ apiKey: "offline", baseURL: "https://example.invalid" });
     const deepseek = createDeepSeekPlugin({ apiKey: "offline" });
-    const gptPrompt = getPromptStore().get("gpt");
-    const deepseekPrompt = getPromptStore().get("deepseek");
+    const gptPrompt = store.get("gpt");
+    const deepseekPrompt = store.get("deepseek");
+    await store.reload("gpt");
     await withResponses([sse([messageText("GPT")]), sse([messageText("DeepSeek")])], async (bodies) => {
         await runModelPlugin(gpt, "offline", { signal: new AbortController().signal }, gptPrompt);
         await runModelPlugin(deepseek, "offline", { signal: new AbortController().signal }, deepseekPrompt);
-        assert.equal(bodies[0].instructions, GPT_SYSTEM_PROMPT);
-        assert.equal(bodies[1].instructions, DEEPSEEK_SYSTEM_PROMPT);
+        assert.equal(bodies[0].instructions, gptPrompt.content);
+        assert.equal(bodies[1].instructions, deepseekPrompt.content);
+        assert.equal(gptPrompt.revision, 1);
+        assert.equal(store.get("gpt").revision, 2);
     });
 });
 

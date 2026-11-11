@@ -1,0 +1,9 @@
+# Password setup and login
+
+For a new deployment without GitHub OAuth, run `pnpm dev`, then run `pnpm setup-token` in a separate trusted interactive terminal in the same working directory. The command displays one credential for ten minutes; it cannot be redirected and must not be shared. Open the Web UI, enter the credential and choose an administrator password of at least 12 characters. The browser signs in after the server initializes. After restart use the password login form.
+
+The default allowed browser Origin is `http://127.0.0.1:5173`. For another deployment set `STARDUST_PUBLIC_ORIGIN` to the exact public HTTPS origin; plain HTTP is allowed only for loopback hosts. Login, claim and management writes check Origin. GitHub OAuth remains available when configured; any GitHub OAuth environment setting prevents new local claims. No local anonymous access mode is implemented.
+
+`data/admin-auth.json` contains a salted scrypt hash, not the password. The temporary challenge stores a hash of the one-time credential, not the credential itself; both and their lock files are gitignored. On POSIX the files are created with mode 0600 and new directories with 0700. Windows mode bits do not establish an ACL: ensure the working directory and `data` directory inherit an ACL limited to the trusted service user and administrators. The temporary credential is printed only to the interactive terminal; protect that terminal and its scrollback.
+
+The claim lock fails closed. If the process crashes while holding it, after stopping all Stardust processes and verifying no claim is running, an administrator may remove `data/admin-auth.json.lock` and issue a new token. If the Runtime cannot initialize after a claim, the account remains claimed and the user can log in after correcting the failure or restarting.

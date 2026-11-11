@@ -1,4 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
+import { verifyClaimPassword } from "./initial-claim.js";
 import { logger } from "../shared/logger.js";
 import type { WebSessionRepository, WebSessionUser } from "./web-session-repository.js";
 
@@ -78,19 +80,65 @@ export class WebAuthService {
     private readonly configResult: OAuthConfigResult;
     private readonly fetcher: typeof fetch;
     private readonly now: () => number;
+    private readonly passwordFile?: string;
+    private readonly passwordOrigin?: string;
+    private passwordFailures: number[] = [];
+    private passwordPending = false;
 
     constructor(
         environment: NodeJS.ProcessEnv,
         private readonly sessions: WebSessionRepository | undefined,
-        options: { fetch?: typeof fetch; now?: () => number } = {},
+        options: { fetch?: typeof fetch; now?: () => number; passwordFile?: string; passwordOrigin?: string } = {},
     ) {
         this.configResult = loadGitHubOAuthConfig(environment);
         this.fetcher = options.fetch ?? fetch;
         this.now = options.now ?? Date.now;
+        this.passwordFile = options.passwordFile;
+        if (options.passwordOrigin) {
+            try {
+                const origin = new URL(options.passwordOrigin);
+                if (origin.origin === options.passwordOrigin && !origin.username && !origin.password &&
+                    (origin.protocol === "https:" || (origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)))) this.passwordOrigin = origin.origin;
+            } catch { /* Invalid deployment origin leaves password authentication locked. */ }
+        }
     }
 
     get configured(): boolean {
-        return Boolean(this.configResult.config && this.sessions);
+        return Boolean((this.configResult.config || this.passwordConfigured) && this.sessions);
+    }
+
+    get passwordConfigured(): boolean { return Boolean(this.passwordFile && this.passwordOrigin && existsSync(this.passwordFile)); }
+
+    passwordOriginAllowed(origin: string | undefined): boolean { return Boolean(origin && this.passwordOrigin && origin === this.passwordOrigin); }
+
+    /** Called only by trusted server code after a successful claim. */
+    createPasswordSession(): { token: string; user: WebSessionUser } | null {
+        if (!this.passwordConfigured || !this.sessions) return null;
+        const user = { id: "local-admin", login: "管理员", avatarUrl: null };
+        const token = randomBytes(32).toString("base64url");
+        const createdAt = this.now();
+        this.sessions.create(createTokenHash(token), user, createdAt, createdAt + WEB_SESSION_TTL_MS);
+        return { token, user };
+    }
+
+    async loginPassword(password: string): Promise<{ token: string; user: WebSessionUser } | null> {
+        if (!this.passwordConfigured || !this.sessions || !this.passwordFile || this.passwordPending) return null;
+        const now = this.now();
+        this.passwordFailures = this.passwordFailures.filter((time) => time > now - 60_000);
+        if (this.passwordFailures.length >= 10) return null;
+        this.passwordPending = true;
+        try {
+            if (!await verifyClaimPassword(this.passwordFile, password)) { this.passwordFailures.push(now); return null; }
+            this.passwordFailures = [];
+            return this.createPasswordSession();
+        } finally { this.passwordPending = false; }
+    }
+
+    securePasswordCookie(): boolean { return this.passwordOrigin?.startsWith("https://") ?? false; }
+
+    originAllowedForSession(origin: string | undefined, rawToken: string | undefined): boolean {
+        const session = this.getSession(rawToken);
+        return session?.id === "local-admin" ? this.passwordOriginAllowed(origin) : Boolean(origin && origin === this.allowedOrigin);
     }
 
     get secureCookies(): boolean {
@@ -187,8 +235,10 @@ export class WebAuthService {
     }
 
     getSession(rawToken: string | undefined) {
-        if (!rawToken || !this.sessions || !this.configResult.config) return null;
-        return this.sessions.find(createTokenHash(rawToken), this.now());
+        if (!rawToken || !this.sessions || !this.configured) return null;
+        const session = this.sessions.find(createTokenHash(rawToken), this.now());
+        if (!session) return null;
+        return session.id === "local-admin" ? (this.passwordConfigured ? session : null) : (this.configResult.config ? session : null);
     }
 
     logout(rawToken: string | undefined): void {

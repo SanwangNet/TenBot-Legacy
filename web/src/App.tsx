@@ -34,6 +34,7 @@ const connectionLabels = {
 } as const;
 
 const qqLabels = {
+    unconfigured: "未配置",
     connecting: "连接中",
     connected: "已连接",
     disconnected: "未连接",

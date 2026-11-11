@@ -39,7 +39,6 @@ const authEnvironment = {
     GITHUB_OAUTH_CALLBACK_URL: "http://127.0.0.1:3000/api/auth/github/callback",
     GITHUB_OAUTH_ALLOWED_USER_IDS: "12345678",
 };
-let nextTestWebPort = 20_000;
 const authCookies = new Map<string, string>();
 
 async function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
@@ -224,7 +223,7 @@ async function createAuthFixture(control: TenBotControl, options: {
     if (options.seedSession !== false) repository.create(createTokenHash(rawToken), user, now, now + WEB_SESSION_TTL_MS);
     const auth = new WebAuthService(options.environment ?? authEnvironment, repository, { fetch: options.fetch, now: options.now });
     const web = createTenBotWebServer(control, {
-        host: "127.0.0.1", port: options.port ?? nextTestWebPort++,
+        host: "127.0.0.1", port: options.port ?? 0,
         staticDirectory: options.staticDirectory,
         memeService: options.memeService,
         auth,
@@ -443,7 +442,7 @@ test("PATCH /api/config validates allowlisted patches and delegates updates thro
             body: JSON.stringify(imagePatch),
         });
         assert.equal(imageResponse.status, 200, "image parameter compatibility is validated against the server's current upstream catalog");
-        assert.deepEqual(fake.patchCalls[2], imagePatch);
+        assert.deepEqual(fake.patchCalls[2], { ...imagePatch, value: { ...imagePatch.value, dailyLimit: 3 } });
 
         fake.setUpdateResult({ ok: false, requiresRestart: false, changedFields: [], message: "配置无效", details: "upstream capability profile mismatch" });
         const invalidImage = await fetch(`${baseUrl}/api/config`, {

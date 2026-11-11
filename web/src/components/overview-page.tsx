@@ -3,6 +3,7 @@ import { useLastRuntimeEventAt, useRuntime } from "../runtime/runtime-context.js
 import type { RuntimeStatus } from "../api/types.js";
 
 const connectionLabels: Record<RuntimeStatus["qq"], string> = {
+    unconfigured: "未配置",
     connecting: "连接中",
     connected: "已连接",
     disconnected: "未连接",
@@ -10,6 +11,7 @@ const connectionLabels: Record<RuntimeStatus["qq"], string> = {
 };
 
 const connectionTone: Record<RuntimeStatus["qq"], string> = {
+    unconfigured: "muted",
     connecting: "warning",
     connected: "good",
     disconnected: "muted",

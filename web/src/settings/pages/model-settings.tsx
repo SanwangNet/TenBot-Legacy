@@ -1,5 +1,5 @@
 import React from "react";
-import { getGptModelPickerEntries, gptModelOptionLabel } from "../../../../src/ai/model-classification.js";
+import { getGptModelPickerEntries, gptModelOptionLabel } from "../../../../packages/shared/src/model-classification.js";
 import { PanelHeading, SettingField } from "../settings-fields.js";
 import type { ModelCatalogProps, SettingsPageProps } from "../settings-page-types.js";
 import type { SettingsValues } from "../settings-state.js";

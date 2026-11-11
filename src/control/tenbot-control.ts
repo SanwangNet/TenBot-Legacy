@@ -17,7 +17,18 @@ export type ReloadResult =
 
 export type StatusListener = (status: RuntimeStatus) => void;
 
+export interface MemberImageQuotaSnapshot {
+    groupOpenid: string; memberOpenid: string; globalDailyLimit: number; dailyLimitOverride: number | null;
+    effectiveDailyLimit: number; todayBaseUsed: number; todayBonusUsed: number; todayUsed: number;
+    remainingBase: number; bonusCredits: number;
+}
+export interface ImageCreditGrantRequest { operationId: string; delta: number; groupOpenid: string; memberOpenid: string; operator: string }
+export interface ImageCreditGrantResult { grant: { operationId: string; balanceAfter: number; duplicate: boolean }; quota: MemberImageQuotaSnapshot }
+
 export interface TenBotControl {
+    getMemberImageQuota?(groupOpenid: string, memberOpenid: string): Promise<MemberImageQuotaSnapshot>;
+    setMemberDailyImageLimitOverride?(groupOpenid: string, memberOpenid: string, limit: number | null): Promise<MemberImageQuotaSnapshot | null>;
+    grantMemberImageCredits?(request: ImageCreditGrantRequest): Promise<ImageCreditGrantResult | null>;
     getStatus(): RuntimeStatus;
     getConfig(): PublicConfig;
     getGptModels(): Promise<GptModelCatalog>;
@@ -43,6 +54,9 @@ export interface TenBotControl {
 }
 
 export interface TenBotControlOperations {
+    getMemberImageQuota?: TenBotControl["getMemberImageQuota"];
+    setMemberDailyImageLimitOverride?: TenBotControl["setMemberDailyImageLimitOverride"];
+    grantMemberImageCredits?: TenBotControl["grantMemberImageCredits"];
     getStatus(): RuntimeStatus;
     getConfig(): PublicConfig;
     getGptModels(): Promise<GptModelCatalog>;
@@ -74,6 +88,9 @@ export function createTenBotControl(operations: TenBotControlOperations): TenBot
     const getStatus = (): RuntimeStatus => structuredClone(operations.getStatus());
 
     return {
+        ...(operations.getMemberImageQuota ? { getMemberImageQuota: operations.getMemberImageQuota } : {}),
+        ...(operations.setMemberDailyImageLimitOverride ? { setMemberDailyImageLimitOverride: operations.setMemberDailyImageLimitOverride } : {}),
+        ...(operations.grantMemberImageCredits ? { grantMemberImageCredits: operations.grantMemberImageCredits } : {}),
         getStatus,
         getConfig: () => structuredClone(operations.getConfig()),
         getGptModels: async () => structuredClone(await operations.getGptModels()),

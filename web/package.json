@@ -1,0 +1,24 @@
+{
+  "name": "@stardust/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "build": "vite build --config vite.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stardust/shared": "workspace:*",
+    "@monaco-editor/react": "^4.7.0",
+    "react": "^19.3.0",
+    "react-dom": "19.3.0",
+    "monaco-editor": "^0.57.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.1",
+    "typescript": "^7.0.2"
+  }
+}

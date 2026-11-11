@@ -1,7 +1,7 @@
 import React from "react";
 import type { ImageModelCapabilities } from "../../api/types.js";
-import { parseImageDimensions } from "../../../../src/ai/image-capabilities.js";
-import { getGptModelPickerEntries, gptModelCategoryLabel, gptModelClassificationLabel } from "../../../../src/ai/model-classification.js";
+import { parseImageDimensions } from "../../../../packages/shared/src/image-capabilities.js";
+import { getGptModelPickerEntries, gptModelCategoryLabel, gptModelClassificationLabel } from "../../../../packages/shared/src/model-classification.js";
 import { PanelHeading, SettingField, imageQualityLabel, imageSizeLabel } from "../settings-fields.js";
 import type { ModelCatalogProps, SettingsPageProps } from "../settings-page-types.js";
 import type { SettingsValues } from "../settings-state.js";

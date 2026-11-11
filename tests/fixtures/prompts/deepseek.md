@@ -1,0 +1,1 @@
+DeepSeek only fixture

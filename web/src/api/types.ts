@@ -1,6 +1,6 @@
-import type { GptModelSummary } from "../../../src/ai/model-classification.js";
+import type { GptModelSummary } from "../../../packages/shared/src/model-classification.js";
 
-export type QqConnectionState = "connecting" | "connected" | "disconnected" | "error";
+export type QqConnectionState = "unconfigured" | "connecting" | "connected" | "disconnected" | "error";
 
 export interface AuthMeResponse {
     authenticated: true;
@@ -67,6 +67,7 @@ export interface ImageModelCapabilities {
 export type LogLevel = "all" | "debug" | "info" | "warn" | "error";
 
 export interface PublicConfig {
+    configuration?: { revision: number; sources: Readonly<Record<string, "environment" | "web" | "default">> };
     aiProvider: "gpt" | "deepseek";
     image: ImageGenerationConfig;
     memeSendMaxEdge: number | null;

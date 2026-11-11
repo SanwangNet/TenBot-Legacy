@@ -1,0 +1,5 @@
+{
+  "name": "@stardust/shared",
+  "private": true,
+  "type": "module"
+}

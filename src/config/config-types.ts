@@ -63,6 +63,7 @@ export interface AppConfig {
 }
 
 export interface PublicConfig {
+    configuration?: { revision: number; sources: Readonly<Record<string, "environment" | "web" | "default">> };
     aiProvider: ModelProviderId;
     image: ImageGenerationConfig;
     memeSendMaxEdge: number | null;

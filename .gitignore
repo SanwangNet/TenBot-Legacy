@@ -26,6 +26,9 @@ Thumbs.db
 /data/*.db
 /data/*.db-shm
 /data/*.db-wal
+/data/web-config.json
+/data/admin-auth.json*
+/data/.admin-auth.json.*.tmp
 /data/memes/
 /data/cache/meme-candidates/
 /data/cache/meme-send/

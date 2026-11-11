@@ -25,6 +25,7 @@ export function providerLabel(provider: string): string {
 
 export function connectionLabel(state: QqConnectionState): string {
     return {
+        unconfigured: "未配置",
         connecting: "连接中",
         connected: "已连接",
         disconnected: "未连接",

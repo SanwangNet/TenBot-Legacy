@@ -4,7 +4,7 @@ import type { GptModelsResponse, ImageModelCapabilities, PublicConfigPatch } fro
 import type { SettingsSection } from "../navigation.js";
 import { useRuntime } from "../runtime/runtime-context.js";
 import { useFeedback } from "../ui/feedback.js";
-import { parseImageDimensions } from "../../../src/ai/image-capabilities.js";
+import { parseImageDimensions } from "../../../packages/shared/src/image-capabilities.js";
 import {
     createSettingsForm,
     dirtySettingsFields,
@@ -155,6 +155,10 @@ export function SettingsPage({ section, onSectionChange, onDirtyChange }: {
             <SettingsNavigation section={section} dirtySections={dirtySections} onChange={onSectionChange} />
             <div className="settings-content">
                 <SettingsSubheading section={section} />
+                {form?.baseline.configuration && <details className="settings-note"><summary>查看配置来源</summary>
+                    <p>环境变量包括部署环境和 .env；环境变量优先于 Web 保存值。</p>
+                    <ul>{Object.entries(form.baseline.configuration.sources).map(([key, source]) => <li key={key}>{key}：{source === "environment" ? "环境变量" : source === "web" ? "Web 设置" : "默认值"}</li>)}</ul>
+                </details>}
                 {form.externalConflict && <div className="settings-conflict" role="status"><span>服务器配置已更新；当前表单有未提交修改，请核对后再保存。</span><button type="button" className="button button-secondary" disabled={!config || saving} onClick={() => config && dispatch({ type: "reload", config })}>重新载入</button></div>}
                 {currentFeedback && <div className={`settings-feedback ${currentFeedback.tone}`} role={currentFeedback.tone === "error" ? "alert" : "status"}>{currentFeedback.message}</div>}
                 <form className="settings-form" onSubmit={(event) => void save(event)}>

@@ -1,0 +1,6 @@
+{
+  "name": "@stardust/server",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "cd ../.. && tsx apps/server/main.ts" }
+}

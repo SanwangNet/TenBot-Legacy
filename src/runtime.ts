@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { getPromptStore, type PromptProvider } from "./ai/prompt-store.js";
 import { listGptModelCatalog, type GptModelCatalog } from "./ai/plugins/gpt/model-catalog.js";
 import { toPublicConfig, validateImageGenerationConfig } from "./config/config-validation.js";
-import { createConfigStore } from "./config/config-store.js";
+import { createConfigurationService } from "../packages/config/src/index.js";
 import { createTenBotControl, type ReloadResult, type TenBotControl } from "./control/tenbot-control.js";
 import { createProviderErrorNotice } from "./control/provider-error.js";
 import type { RuntimeStatus } from "./control/runtime-status.js";
@@ -43,11 +43,22 @@ import { createImageGenerationService } from "./ai/image-generation-service.js";
 export interface TenBotRuntime {
     control: TenBotControl;
     start(): Promise<void>;
+    handleHttp: import("node:http").RequestListener;
 }
 
 export interface CreateTenBotRuntimeOptions {
     consoleLogs?: boolean;
     logDirectory?: string;
+    envPath?: string;
+    environment?: NodeJS.ProcessEnv;
+    databasePath?: string;
+    configPath?: string;
+    createBot?: typeof createQqBot;
+    createWebServer?: typeof createTenBotWebServer;
+    externalHttp?: boolean;
+    signal?: AbortSignal;
+    passwordFile?: string;
+    passwordOrigin?: string;
 }
 
 function absolutePath(path: URL | string): string {
@@ -59,12 +70,16 @@ function gptCatalogSourceKey(apiKey?: string, baseURL?: string): string {
 }
 
 export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = {}): Promise<TenBotRuntime> {
+    options.signal?.throwIfAborted();
     refreshLogSecrets();
     setConsoleLogOutputEnabled(options.consoleLogs ?? true);
     configureLogFileSink(options.logDirectory ?? resolve(process.cwd(), "logs"));
     const logs = new LogBuffer();
     let gptModelCatalogCache: { sourceKey: string; catalog: GptModelCatalog } | undefined;
-    const configStore = createConfigStore({
+    const configStore = createConfigurationService({
+        storagePath: options.configPath ?? (options.databasePath ? `${options.databasePath}.config.json` : undefined),
+        envPath: options.envPath,
+        environment: options.environment,
         validateImageConfig(imageConfig, current) {
             const sourceKey = gptCatalogSourceKey(current.ai.gpt.apiKey, current.ai.gpt.baseURL);
             const capabilities = gptModelCatalogCache?.sourceKey === sourceKey
@@ -85,10 +100,14 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
         if (model.id !== "gpt" && model.id !== "deepseek") throw new Error(`Unsupported model id: ${model.id}`);
         botLoopGuard.setMaxCycles(appConfig.botLoopGuard.maxCycles);
         await promptStore.load(model.id);
+        options.signal?.throwIfAborted();
         await replyJudgePromptStore.load();
+        options.signal?.throwIfAborted();
         await loadMemeRuntime();
+        options.signal?.throwIfAborted();
         try { await memeSendImageService.cleanupStaleFiles(); }
         catch { logger.error("[Meme] unable to clean stale temporary send files"); }
+        options.signal?.throwIfAborted();
     } catch (error) {
         logs.dispose();
         await closeLogFileSink();
@@ -101,7 +120,7 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
         prompt: replyJudgePromptStore.get(),
     }));
 
-    let qqState: QqConnectionState = "disconnected";
+    let qqState: QqConnectionState = qqConnectionAtStart.appId && qqConnectionAtStart.appSecret ? "disconnected" : "unconfigured";
     let shuttingDown = false;
     let startPromise: Promise<void> | undefined;
     let shutdownPromise: Promise<void> | undefined;
@@ -117,6 +136,8 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     let qqRestartRequired = false;
     let configReloadQueue: Promise<void> = Promise.resolve();
 
+    let bot: ReturnType<typeof createQqBot> | undefined;
+    let statusTimer: ReturnType<typeof setInterval> | undefined;
     let control: ReturnType<typeof createTenBotControl> | undefined;
     let webServer: ReturnType<typeof createTenBotWebServer> | undefined;
     let webSessionRepository: WebSessionRepository | undefined;
@@ -204,7 +225,8 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     let memberDatabaseAvailable = false;
     let detectionEvidencePruneTimer: ReturnType<typeof setInterval> | undefined;
     try {
-        sqliteMemberRepository = new SqliteMemberRepository();
+    try {
+        sqliteMemberRepository = new SqliteMemberRepository(options.databasePath);
         memberRepository = sqliteMemberRepository;
         memberDatabaseAvailable = true;
         stateRepository = sqliteMemberRepository;
@@ -219,6 +241,7 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     } catch (error) {
         logger.error("[Members] legacy automated peer import failed; group bot state remains unchanged", error);
     }
+    options.signal?.throwIfAborted();
     const pruneDetectionEvidence = () => {
         void memberRepository.pruneExpiredDetectionEvidence().catch((error) => {
             logger.error("[BotDetector] expired detection evidence cleanup failed", error);
@@ -236,6 +259,7 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
         control?.publishEvent({ type: "members-updated" });
     });
     await groupReplyControl.initialize();
+    options.signal?.throwIfAborted();
 
     const botDetector = new BotDetector(memberRepository, Date.now, () => control?.publishEvent({ type: "members-updated" }));
     const imageGenerationService = createImageGenerationService({
@@ -252,9 +276,10 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     });
     try { await imageGenerationService.recoverPendingRequests(); }
     catch { logger.error("[Image] pending request recovery failed"); }
-    let bot: ReturnType<typeof createQqBot>;
+    options.signal?.throwIfAborted();
     try {
-        bot = createQqBot((state) => {
+        if (qqState !== "unconfigured") bot = (options.createBot ?? createQqBot)((state) => {
+            if (shuttingDown) return;
             qqState = state;
             control?.publishStatus();
         }, (message) => {
@@ -349,7 +374,10 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     control = createTenBotControl({
         getStatus: status,
         getConfig: () => {
-            try { return configStore.getPublicConfig(); }
+            try {
+                const snapshot = configStore.getSnapshot();
+                return { ...snapshot.value, configuration: { revision: snapshot.revision, sources: snapshot.sources } };
+            }
             catch { return toPublicConfig(runtimeSnapshot.appConfig); }
         },
         getGptModels: async () => {
@@ -359,14 +387,14 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
             return catalog;
         },
         async updateConfig(patch) {
-            const saved = await configStore.updatePublicConfig(patch);
+            const saved = await configStore.update(patch);
             if (!saved.ok) return saved;
             const applied = await reloadRuntimeConfig();
             await envWatcher?.markCurrent();
             return {
                 ...saved,
                 requiresRestart: applied.requiresRestart,
-                message: applied.ok ? "配置已保存并立即生效。" : applied.message,
+                message: applied.ok ? "配置已保存；环境变量优先于 Web 设置。" : applied.message,
             };
         },
         getGroups: () => memberRepository.listGroups(),
@@ -445,10 +473,10 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
                 control?.publishStatus();
                 try { await webServer?.close(); }
                 catch (error) { logger.error("[Web] stop failed", error); }
-                shutdownQqMessageHandler(bot);
+                if (bot) shutdownQqMessageHandler(bot);
                 const stopCycles = shutdownReplyCoordinator();
                 const stopImages = imageGenerationService.shutdown();
-                try { bot.stop(); }
+                try { bot?.stop(); }
                 catch (error) { logger.error("[QQ] stop error", error); }
                 try {
                     await Promise.all([stopCycles, stopImages, startPromise?.catch(() => undefined)]);
@@ -457,9 +485,9 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
                     catch (error) { logger.error("[Members] SQLite close failed", error); }
                     try { webSessionRepository?.close(); }
                     catch (error) { logger.error("[Auth] Session database close failed", error); }
-                    qqState = "disconnected";
+                    if (bot) qqState = "disconnected";
                     control?.publishStatus();
-                    clearInterval(statusTimer);
+                    if (statusTimer) clearInterval(statusTimer);
                     unsubscribeProviderErrors();
                     unsubscribeReplyLifecycle();
                     if (detectionEvidencePruneTimer) clearInterval(detectionEvidencePruneTimer);
@@ -473,10 +501,10 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
         },
     });
 
-    try { webSessionRepository = new WebSessionRepository(); }
+    try { webSessionRepository = new WebSessionRepository(options.databasePath); }
     catch { logger.error("[Auth] Session storage unavailable; management API remains locked"); }
-    const webAuth = new WebAuthService(process.env, webSessionRepository);
-    webServer = createTenBotWebServer(control, {
+    const webAuth = new WebAuthService(process.env, webSessionRepository, { passwordFile: options.passwordFile, passwordOrigin: options.passwordOrigin });
+    webServer = (options.createWebServer ?? createTenBotWebServer)(control, {
         host: runtimeSnapshot.appConfig.web.host,
         port: runtimeSnapshot.appConfig.web.port,
         auth: webAuth,
@@ -541,6 +569,7 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     });
     fileWatchers.push(memeWatcher);
     await Promise.all(fileWatchers.map((watcher) => watcher.start()));
+    options.signal?.throwIfAborted();
 
     unsubscribeProviderErrors = subscribeProviderErrors((signal) => {
         control?.publishEvent({
@@ -551,7 +580,7 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
     unsubscribeReplyLifecycle = subscribeReplyLifecycle(observeReplyLifecycle);
 
     let lastStatus = JSON.stringify(status());
-    const statusTimer = setInterval(() => {
+    statusTimer = setInterval(() => {
         const next = JSON.stringify(status());
         if (next !== lastStatus) {
             lastStatus = next;
@@ -562,26 +591,55 @@ export async function createTenBotRuntime(options: CreateTenBotRuntimeOptions = 
 
     return {
         control,
+        handleHttp: (request, response) => webServer!.handle(request, response),
         start(): Promise<void> {
             if (startPromise) return startPromise;
             if (shuttingDown) return Promise.resolve();
             startPromise = (async () => {
-                await webServer?.start();
+                if (!options.externalHttp) await webServer?.start();
                 if (shuttingDown) return;
+                if (!bot) return;
+                const activeBot = bot;
                 qqState = "connecting";
                 control?.publishStatus();
-                try {
-                    await bot.start();
-                    qqState = "disconnected";
-                    control?.publishStatus();
-                } catch (error) {
-                    qqState = "error";
-                    control?.publishStatus();
-                    logger.error("[QQ] startup failed", error);
-                    throw error;
-                }
+                // SDK start represents the connection lifetime, not readiness.
+                void Promise.resolve().then(() => {
+                    if (!shuttingDown) return activeBot.start();
+                }).then(() => {
+                    if (!shuttingDown) {
+                        qqState = "disconnected";
+                        control?.publishStatus();
+                    }
+                }).catch((error) => {
+                    if (!shuttingDown) {
+                        qqState = "error";
+                        control?.publishStatus();
+                        logger.error("[QQ] startup failed", error);
+                    }
+                }).finally(() => {
+                    if (shuttingDown) {
+                        // SDK token prefetch can install a new refresher after the first stop.
+                        try { activeBot.stop(); }
+                        catch (error) { logger.error("[QQ] stop error", error); }
+                    }
+                });
             })();
             return startPromise;
         },
     };
+    } catch (error) {
+        if (detectionEvidencePruneTimer) clearInterval(detectionEvidencePruneTimer);
+        if (statusTimer) clearInterval(statusTimer);
+        fileWatchers.forEach((watcher) => watcher.close());
+        unsubscribeProviderErrors();
+        unsubscribeReplyLifecycle();
+        if (bot) { shutdownQqMessageHandler(bot); try { bot.stop(); } catch { /* best effort */ } }
+        try { await webServer?.close(); } catch { /* best effort */ }
+        try { sqliteMemberRepository?.close(); } catch { /* best effort */ }
+        try { webSessionRepository?.close(); } catch { /* best effort */ }
+        logs.dispose();
+        setConsoleLogOutputEnabled(true);
+        await closeLogFileSink();
+        throw error;
+    }
 }

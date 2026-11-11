@@ -190,7 +190,7 @@ function fakeControl(calls: string[], result: ReloadResult = { ok: true, message
     };
     const config: PublicConfig = {
         aiProvider: "gpt",
-        image: { enabled: false, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
+        image: { enabled: false, dailyLimit: 3, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
         memeSendMaxEdge: 160,
         replyJudge: { model: "judge-test", timeoutMs: 5_000, fallbackToMainOnInvalidOutput: true, turnWaitMs: 20_000 },
         gpt: { model: "test", reasoningEffort: "high", verbosity: "high", configured: false },
@@ -250,6 +250,7 @@ test("TUI displays reload failures and Ctrl+C requests a confirmation", async ()
 });
 
 test("TUI localizes status values and log scopes without changing plain logger text", () => {
+    assert.equal(connectionLabel("unconfigured"), "未配置");
     assert.equal(connectionLabel("connected"), "已连接");
     assert.equal(connectionLabel("disconnected"), "未连接");
     assert.equal(connectionLabel("error"), "异常");
@@ -402,7 +403,7 @@ test("centered modal click regions follow the resized center and ignore old corn
 test("settings select and text editors create safe patches without touching a real env", () => {
     const config: PublicConfig = {
         aiProvider: "gpt",
-        image: { enabled: false, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
+        image: { enabled: false, dailyLimit: 3, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
         memeSendMaxEdge: 160,
         replyJudge: { model: "Qwen/Qwen3.5-4B", timeoutMs: 5_000, fallbackToMainOnInvalidOutput: true, turnWaitMs: 20_000 },
         gpt: { model: "gpt-6-sol", reasoningEffort: "high", verbosity: "high", configured: false },
@@ -439,7 +440,7 @@ test("settings select and text editors create safe patches without touching a re
 test("settings render Reply Judge as an equal-width settings column with keyboard and mouse rows", () => {
     const config: PublicConfig = {
         aiProvider: "gpt",
-        image: { enabled: false, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
+        image: { enabled: false, dailyLimit: 3, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
         memeSendMaxEdge: 160,
         replyJudge: { model: "Qwen/Qwen3.5-4B", timeoutMs: 15_000, fallbackToMainOnInvalidOutput: true, turnWaitMs: 20_000 },
         gpt: { model: "gpt-6-sol", reasoningEffort: "high", verbosity: "high", configured: true },
@@ -515,7 +516,7 @@ test("settings shows pending restart only when Runtime marks a non-hot-reloadabl
     };
     const config: PublicConfig = {
         aiProvider: "deepseek",
-        image: { enabled: false, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
+        image: { enabled: false, dailyLimit: 3, provider: "gpt", model: "", quality: "low", size: "1024x1024", outputFormat: "png" },
         memeSendMaxEdge: 160,
         replyJudge: { model: "judge-test", timeoutMs: 5_000, fallbackToMainOnInvalidOutput: true, turnWaitMs: 20_000 },
         gpt: { model: "gpt-6-sol", reasoningEffort: "high", verbosity: "high", configured: true },

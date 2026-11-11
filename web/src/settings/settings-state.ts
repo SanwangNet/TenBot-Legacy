@@ -1,6 +1,6 @@
 import type { ConfigPatchResponse, ImageGenerationConfig, ImageModelCapabilities, PublicConfig, PublicConfigPatch } from "../api/types.js";
 import type { SettingsSection } from "../navigation.js";
-import { imageSizeSupportedByCapabilities, parseImageDimensions, validateGptImage2CustomSize } from "../../../src/ai/image-capabilities.js";
+import { imageSizeSupportedByCapabilities, parseImageDimensions, validateGptImage2CustomSize } from "../../../packages/shared/src/image-capabilities.js";
 
 export type ImageSettingsField =
     | "image.enabled"
@@ -211,7 +211,7 @@ export function settingsPatches(form: SettingsFormState, section?: SettingsSecti
             }
         }
     });
-    if (imageChanged) patches.push({ field: "image", value: imageConfigFromValues(form.values) });
+    if (imageChanged) patches.push({ field: "image", value: { ...imageConfigFromValues(form.values), dailyLimit: form.baseline.image.dailyLimit } });
     return patches;
 }
 
@@ -306,7 +306,7 @@ export function settingsFormReducer(state: SettingsFormState | null, action: Set
     return state;
 }
 
-function imageConfigFromValues(values: SettingsValues): ImageGenerationConfig {
+function imageConfigFromValues(values: SettingsValues): Omit<ImageGenerationConfig, "dailyLimit"> {
     return {
         enabled: values["image.enabled"],
         provider: values["image.provider"],

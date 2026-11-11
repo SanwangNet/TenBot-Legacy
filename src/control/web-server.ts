@@ -69,10 +69,6 @@ function clearCookie(name: string, secure: boolean): string {
     return cookie(name, "", 0, secure);
 }
 
-function csrfAllowed(origin: string | undefined, allowedOrigin: string | undefined): boolean {
-    return Boolean(origin && allowedOrigin && origin === allowedOrigin);
-}
-
 function error(response: ServerResponse, statusCode: number, message: string): void {
     json(response, statusCode, { error: { message } });
 }
@@ -114,7 +110,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
     let closing = false;
     let started = false;
 
-    const server: Server = createServer((request, response) => {
+    const dispatch: import("node:http").RequestListener = (request, response) => {
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
         response.setHeader("X-Frame-Options", "DENY");
@@ -123,7 +119,8 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
             if (!response.headersSent) error(response, 500, "Internal server error");
             else if (!response.writableEnded) response.end();
         });
-    });
+    };
+    const server: Server = createServer(dispatch);
 
     server.on("error", (cause) => {
         if (started && !closing) logger.error(`[Web] server error: ${errorText(cause)}`);
@@ -266,6 +263,23 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
             return;
         }
 
+        if (pathname === "/api/auth/password") {
+            if (request.method !== "POST") { response.setHeader("Allow", "POST"); error(response, 405, "Method not allowed"); return; }
+            if (!auth.passwordConfigured) { error(response, 503, "Password authentication is unavailable"); return; }
+            if (!auth.passwordOriginAllowed(request.headers.origin)) { error(response, 403, "Invalid request origin"); return; }
+            let body: unknown;
+            try { body = await readJsonBody(request, 4096); }
+            catch { error(response, 400, "Invalid login request"); return; }
+            if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 || !("password" in body) || typeof body.password !== "string" || Buffer.byteLength(body.password, "utf8") > 1024) {
+                error(response, 400, "Invalid login request"); return;
+            }
+            const result = await auth.loginPassword(body.password);
+            if (!result) { error(response, 401, "Invalid credentials"); return; }
+            response.setHeader("Set-Cookie", cookie(WEB_SESSION_COOKIE, result.token, 7 * 24 * 60 * 60, auth.securePasswordCookie()));
+            json(response, 200, { authenticated: true, user: result.user });
+            return;
+        }
+
         if (pathname === "/api/auth/me") {
             if (request.method !== "GET") {
                 response.setHeader("Allow", "GET");
@@ -292,12 +306,13 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
                 return;
             }
             const token = requestCookie(request, WEB_SESSION_COOKIE);
-            if (token && auth.configured && !csrfAllowed(request.headers.origin, auth.allowedOrigin)) {
+            const session = auth.getSession(token);
+            if (token && auth.configured && !auth.originAllowedForSession(request.headers.origin, token)) {
                 error(response, 403, "Invalid request origin");
                 return;
             }
             auth.logout(token);
-            response.setHeader("Set-Cookie", clearCookie(WEB_SESSION_COOKIE, auth.secureCookies));
+            response.setHeader("Set-Cookie", clearCookie(WEB_SESSION_COOKIE, session?.id === "local-admin" ? auth.securePasswordCookie() : auth.secureCookies));
             json(response, 200, { ok: true });
             return;
         }
@@ -313,7 +328,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
                 return;
             }
             if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method ?? "") &&
-                !csrfAllowed(request.headers.origin, auth.allowedOrigin)) {
+                !auth.originAllowedForSession(request.headers.origin, requestCookie(request, WEB_SESSION_COOKIE))) {
                 error(response, 403, "Invalid request origin");
                 return;
             }
@@ -454,6 +469,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
                 if (suffix[2]!.includes("/") || !isValidMemberOpenid(memberOpenid)) { error(response, 400, "Invalid member ID"); return; }
                 try {
                     if (!await control.getGroupMember(groupOpenid, memberOpenid)) { error(response, 404, "Member not found"); return; }
+                    if (!control.getMemberImageQuota) throw new Error("Image quota unavailable");
                     json(response, 200, await control.getMemberImageQuota(groupOpenid, memberOpenid));
                 } catch { error(response, 500, "Unable to read member image quota"); }
                 return;
@@ -477,6 +493,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
                     error(response, 400, "每日绘图上限必须是非负整数或 null"); return;
                 }
                 try {
+                    if (!control.setMemberDailyImageLimitOverride) throw new Error("Image quota unavailable");
                     const quota = await control.setMemberDailyImageLimitOverride(groupOpenid, memberOpenid, limit as number | null);
                     if (!quota) { error(response, 404, "Member not found"); return; }
                     json(response, 200, quota);
@@ -505,6 +522,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
                 const session = auth.getSession(requestCookie(request, WEB_SESSION_COOKIE));
                 if (!session) { error(response, 401, "Authentication required"); return; }
                 try {
+                    if (!control.grantMemberImageCredits) throw new Error("Image quota unavailable");
                     const result = await control.grantMemberImageCredits({ operationId, delta, groupOpenid, memberOpenid,
                         operator: `${session.id}:${session.login}` });
                     if (!result) { error(response, 404, "Member not found"); return; }
@@ -820,6 +838,7 @@ export function createTenBotWebServer(control: TenBotControl, options: WebServer
     }
 
     return {
+        handle: dispatch,
         start(): Promise<WebServerAddress> {
             if (closing) return Promise.reject(new Error("Web server is closing"));
             if (startPromise) return startPromise;

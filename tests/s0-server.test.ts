@@ -16,7 +16,8 @@ test("standalone server does not start legacy runtime even with old configuratio
     try {
         assert.deepEqual(await (await fetch(base + "/api/health")).json(), { ok: true, state: "ready", service: "stardust", legacyApi: "disabled" });
         assert.match(await (await fetch(base + "/")).text(), /Stardust fixture/);
-        for (const [path, method] of [["/api/config", "PATCH"], ["/api/status", "GET"], ["/api/setup/claim", "POST"], ["/api/auth/me", "GET"]]) {
+        assert.equal((await fetch(base + "/api/config", { method: "PATCH" })).status, 415);
+        for (const [path, method] of [["/api/status", "GET"], ["/api/setup/claim", "POST"], ["/api/auth/me", "GET"]]) {
             const response = await fetch(base + path, { method });
             assert.equal(response.status, 410);
         }

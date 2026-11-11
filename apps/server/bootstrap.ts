@@ -1,6 +1,7 @@
 import { createServer, type RequestListener } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
+import { createStardustConfigService } from "../../packages/config/src/stardust.js";
 
 export type ServerState = "starting" | "ready" | "stopping";
 export interface ServerOptions {
@@ -13,6 +14,9 @@ export interface ServerOptions {
     passwordFile?: string;
     passwordOrigin?: string;
     authEnvironment?: NodeJS.ProcessEnv;
+    configPath?: string;
+    envPath?: string;
+    environment?: NodeJS.ProcessEnv;
 }
 export interface StardustServer {
     address: { host: string; port: number };
@@ -24,6 +28,8 @@ export async function createStardustServer(options: ServerOptions = {}): Promise
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 3000;
     const root = resolve(options.staticDirectory ?? "web/dist");
+    const environment = options.environment ?? process.env;
+    const config = createStardustConfigService({ configPath: options.configPath, envPath: options.envPath, environment });
     let state: ServerState = "starting";
     let closePromise: Promise<void> | undefined;
     const mime: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".ttf": "font/ttf", ".png": "image/png", ".woff2": "font/woff2" };
@@ -35,6 +41,41 @@ export async function createStardustServer(options: ServerOptions = {}): Promise
         if (pathname === "/api/health" && request.method === "GET") {
             response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
             response.end(JSON.stringify({ ok: state === "ready", state, service: "stardust", legacyApi: "disabled" }));
+            return;
+        }
+        if (pathname === "/api/config" || pathname === "/api/initialization" || pathname === "/api/config/secrets") {
+            response.setHeader("Cache-Control", "no-store");
+            response.setHeader("Content-Type", "application/json; charset=utf-8");
+            const send = (status: number, value: unknown) => { response.writeHead(status); response.end(JSON.stringify(value)); };
+            if (request.method === "GET" && pathname !== "/api/config/secrets") {
+                void config.snapshot().then((snapshot) => send(200, pathname === "/api/initialization" ? { initialized: snapshot.config.initialized } : snapshot)).catch(() => send(503, { error: "Configuration unavailable" }));
+                return;
+            }
+            const hostHeader = request.headers.host ?? "";
+            const origin = request.headers.origin;
+            if (!hostHeader || (origin && origin !== `http://${hostHeader}`)) { send(403, { error: "Invalid request origin" }); return; }
+            if (!(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) { send(415, { error: "JSON required" }); return; }
+            void (async () => {
+                try {
+                    let body = ""; for await (const chunk of request) { body += String(chunk); if (Buffer.byteLength(body) > 16384) { send(413, { error: "Request too large" }); return; } }
+                    const input: unknown = JSON.parse(body);
+                    if (!input || typeof input !== "object" || Array.isArray(input)) { send(400, { error: "Invalid request" }); return; }
+                    if (pathname === "/api/initialization" && request.method === "POST") {
+                        if (Object.keys(input).length || (await config.snapshot()).config.initialized) { send(409, { error: "Already initialized or invalid request" }); return; }
+                        send(200, await config.initialize()); return;
+                    }
+                    if (pathname === "/api/config/secrets" && request.method === "PUT") {
+                        if (Object.keys(input).length !== 1 || !("modelApiKey" in input) || typeof input.modelApiKey !== "string") { send(400, { error: "Invalid request" }); return; }
+                        send(200, await config.updateSecret(input.modelApiKey)); return;
+                    }
+                    if (pathname === "/api/config" && request.method === "PATCH") {
+                        const allowed = new Set(["service.name", "service.description", "server.host", "server.port", "web.title", "model.provider", "model.model", "model.baseUrl"]);
+                        const entries = Object.entries(input); if (!entries.length || entries.some(([key, value]) => !allowed.has(key) || (key === "server.port" ? typeof value !== "number" : typeof value !== "string"))) { send(400, { error: "Invalid request" }); return; }
+                        send(200, await config.update(Object.fromEntries(entries))); return;
+                    }
+                    send(405, { error: "Method not allowed" });
+                } catch { send(400, { error: "Configuration update failed" }); }
+            })();
             return;
         }
         if (pathname === "/api" || pathname.startsWith("/api/")) {
@@ -73,7 +114,11 @@ export async function createStardustServer(options: ServerOptions = {}): Promise
 }
 
 export async function startServer(): Promise<StardustServer> {
-    const requestedPort = Number(process.env.WEB_PORT ?? 3000);
-    const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535 ? requestedPort : 3000;
-    return createStardustServer({ host: process.env.WEB_HOST || "127.0.0.1", port });
+    try {
+        const snapshot = await createStardustConfigService().snapshot();
+        return createStardustServer({ host: snapshot.config.server.host, port: snapshot.config.server.port });
+    } catch {
+        // Invalid configuration never exposes details and leaves the service reachable on safe defaults.
+        return createStardustServer({ host: "127.0.0.1", port: 3000 });
+    }
 }

@@ -1,0 +1,8 @@
+initialized = true
+[service]
+name = "Stardust"
+description = "test"
+[model]
+provider = ""
+model = ""
+baseUrl = ""
